@@ -1,7 +1,0 @@
-COMMAND: docker compose -f docker-compose.production.yml build crawl-orchestration-service
-returncode=0
-Traceback (most recent call last):
-  File "<string>", line 11, in <module>
-    f.write('STDOUT:\n' + res.stdout + '\n')
-            ~~~~~~~~~~~~^~~~~~~~~~~~
-TypeError: can only concatenate str (not "NoneType") to str
