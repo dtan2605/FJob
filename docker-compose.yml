@@ -1,0 +1,23 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: fjob-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: FJobDb
+      MYSQL_USER: fjob
+      MYSQL_PASSWORD: FJobDb_123!
+      MYSQL_ROOT_PASSWORD: RootDb_123!
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ufjob", "-pFJobDb_123!"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    volumes:
+      - fjob-mysql-data:/var/lib/mysql
+
+volumes:
+  fjob-mysql-data:

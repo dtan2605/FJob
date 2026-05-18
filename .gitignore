@@ -1,0 +1,10 @@
+bin/
+obj/
+App_Data/
+*.log
+.vs/
+.vscode/
+__pycache__/
+*.pyc
+
+.fake

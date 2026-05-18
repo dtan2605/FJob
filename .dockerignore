@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.log
+**/App_Data/
+.git/
+.local/
+.dotnet-cli/
+.sixth/
+node_modules/

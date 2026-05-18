@@ -1,0 +1,15 @@
+COMMAND: docker compose -f docker-compose.production.yml up -d crawl-orchestration-service
+returncode=0
+STDOUT:
+
+STDERR:
+ Container fjob-mysql Running 
+ Container fjob-job-catalog-service-1 Running 
+ Container fjob-crawl-orchestration-service-1 Recreate 
+ Container fjob-crawl-orchestration-service-1 Recreated 
+ Container fjob-mysql Waiting 
+ Container fjob-mysql Healthy 
+ Container fjob-mysql Waiting 
+ Container fjob-mysql Healthy 
+ Container fjob-crawl-orchestration-service-1 Starting 
+ Container fjob-crawl-orchestration-service-1 Started 

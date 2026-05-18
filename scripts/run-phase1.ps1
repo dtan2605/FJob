@@ -1,0 +1,8 @@
+Write-Host "Phase 1 services:"
+Write-Host "1. Start Job Catalog Service"
+Write-Host "   dotnet run --project services/job-catalog-service/src/FJob.JobCatalogService"
+Write-Host "2. Start Crawl Orchestration Service"
+Write-Host "   dotnet run --project services/crawl-orchestration-service/src/FJob.CrawlOrchestrationService"
+Write-Host ""
+Write-Host "Then trigger a crawl request:"
+Write-Host "Invoke-RestMethod -Method Post -Uri http://localhost:5102/api/crawl-requests -ContentType 'application/json' -Body '{\"source\":\"TopCV\",\"keyword\":\"python intern\",\"triggeredBy\":\"admin\"}'"

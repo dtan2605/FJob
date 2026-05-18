@@ -1,0 +1,275 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: fjob-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-FJobDb}
+      MYSQL_USER: ${MYSQL_USER:-fjob}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-FJobDb_123!}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-RootDb_123!}
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER:-fjob}", "-p${MYSQL_PASSWORD:-FJobDb_123!}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    volumes:
+      - fjob-mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7.2
+    container_name: fjob-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: fjob-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: fjob-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - fjob-ollama-data:/root/.ollama
+
+  ollama-init:
+    image: ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "ollama pull ${AI_ADVISOR_MODEL:-qwen2.5:3b}"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+
+  identity-access-service:
+    build:
+      context: .
+      dockerfile: services/identity-access-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${IDENTITY_PORT:-5104}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__MySql: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-FJobDb};User ID=${MYSQL_USER:-fjob};Password=${MYSQL_PASSWORD:-FJobDb_123!};SslMode=None;AllowPublicKeyRetrieval=True
+      Jwt__Issuer: ${JWT_ISSUER:-FJob.Identity}
+      Jwt__Audience: ${JWT_AUDIENCE:-FJob.Admin}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-super-secret-jwt-signing-key-for-fjob-2026-32bytes}
+      Identity__SeedUsers__0__Username: ${ADMIN_OPERATOR_USERNAME:-admin.operator}
+      Identity__SeedUsers__0__Password: ${ADMIN_OPERATOR_PASSWORD:-Operator@123}
+      Identity__SeedUsers__0__Role: operator
+      Identity__SeedUsers__1__Username: ${ADMIN_VIEWER_USERNAME:-admin.viewer}
+      Identity__SeedUsers__1__Password: ${ADMIN_VIEWER_PASSWORD:-Viewer@123}
+      Identity__SeedUsers__1__Role: readonly
+
+  job-catalog-service:
+    build:
+      context: .
+      dockerfile: services/job-catalog-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${JOB_CATALOG_PORT:-5101}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__MySql: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-FJobDb};User ID=${MYSQL_USER:-fjob};Password=${MYSQL_PASSWORD:-FJobDb_123!};SslMode=None;AllowPublicKeyRetrieval=True
+
+  crawl-orchestration-service:
+    build:
+      context: .
+      dockerfile: services/crawl-orchestration-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      job-catalog-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "${ORCHESTRATION_PORT:-5102}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__MySql: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-FJobDb};User ID=${MYSQL_USER:-fjob};Password=${MYSQL_PASSWORD:-FJobDb_123!};SslMode=None;AllowPublicKeyRetrieval=True
+      Orchestration__JobCatalogBaseUrl: http://job-catalog-service:8080
+      Orchestration__PythonExecutable: python3
+      Orchestration__ExecutionScriptPath: /opt/fjob/crawl-execution-service/src/main.py
+      Orchestration__PollingIntervalSeconds: ${ORCHESTRATION_POLLING_INTERVAL_SECONDS:-3}
+      Orchestration__MaxAttempts: ${ORCHESTRATION_MAX_ATTEMPTS:-3}
+      Orchestration__KnownSources__0: TopCV
+      Orchestration__KnownSources__1: Vieclam24h
+      Orchestration__KnownSources__2: Careerviet
+      Orchestration__KnownSources__3: Indeed
+      Orchestration__UseRabbitMq: ${ORCHESTRATION_USE_RABBITMQ:-true}
+      Orchestration__RabbitMqConnectionString: amqp://guest:guest@rabbitmq:5672
+      Orchestration__RabbitMqQueueName: ${RABBITMQ_QUEUE_NAME:-fjob.crawl.requests}
+
+  job-search-service:
+    build:
+      context: .
+      dockerfile: services/job-search-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      job-catalog-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    ports:
+      - "${JOB_SEARCH_PORT:-5103}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__MySql: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-FJobDb};User ID=${MYSQL_USER:-fjob};Password=${MYSQL_PASSWORD:-FJobDb_123!};SslMode=None;AllowPublicKeyRetrieval=True
+      Search__JobCatalogBaseUrl: http://job-catalog-service:8080
+      Search__SyncIntervalSeconds: ${SEARCH_SYNC_INTERVAL_SECONDS:-5}
+      Search__DefaultPageSize: ${SEARCH_DEFAULT_PAGE_SIZE:-20}
+      Search__MaxPageSize: ${SEARCH_MAX_PAGE_SIZE:-100}
+      Search__RedisConnectionString: redis:6379
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      crawl-orchestration-service:
+        condition: service_started
+      job-search-service:
+        condition: service_started
+      identity-access-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    ports:
+      - "${API_GATEWAY_PORT:-5100}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Gateway__JobSearchBaseUrl: http://job-search-service:8080
+      Gateway__JobCatalogBaseUrl: http://job-catalog-service:8080
+      Gateway__CrawlOrchestrationBaseUrl: http://crawl-orchestration-service:8080
+      Gateway__IdentityAccessBaseUrl: http://identity-access-service:8080
+      Gateway__KnownSources__0: TopCV
+      Gateway__KnownSources__1: Vieclam24h
+      Gateway__KnownSources__2: Careerviet
+      Gateway__UseRabbitMq: ${GATEWAY_USE_RABBITMQ:-true}
+      Gateway__RabbitMqConnectionString: amqp://guest:guest@rabbitmq:5672
+      Gateway__RabbitMqQueueName: ${RABBITMQ_QUEUE_NAME:-fjob.crawl.requests}
+      Jwt__Issuer: ${JWT_ISSUER:-FJob.Identity}
+      Jwt__Audience: ${JWT_AUDIENCE:-FJob.Admin}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-super-secret-jwt-signing-key-for-fjob-2026-32bytes}
+      AiAdvisor__UseOllama: ${AI_ADVISOR_USE_OLLAMA:-true}
+      AiAdvisor__BaseUrl: ${AI_ADVISOR_BASE_URL:-http://ollama:11434}
+      AiAdvisor__Model: ${AI_ADVISOR_MODEL:-qwen2.5:3b}
+      AiAdvisor__Temperature: ${AI_ADVISOR_TEMPERATURE:-0.2}
+      AiAdvisor__TimeoutSeconds: ${AI_ADVISOR_TIMEOUT_SECONDS:-45}
+      Gateway__OcrServiceBaseUrl: http://ocr-service:5000
+
+  ocr-service:
+    build:
+      context: ./services/ocr-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_ENV: production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  admin-operations-service:
+    build:
+      context: .
+      dockerfile: services/admin-operations-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      api-gateway:
+        condition: service_started
+      identity-access-service:
+        condition: service_started
+      job-catalog-service:
+        condition: service_started
+      crawl-orchestration-service:
+        condition: service_started
+    ports:
+      - "${ADMIN_OPERATIONS_PORT:-5106}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__MySql: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-FJobDb};User ID=${MYSQL_USER:-fjob};Password=${MYSQL_PASSWORD:-FJobDb_123!};SslMode=None;AllowPublicKeyRetrieval=True
+      AdminOperations__OrchestrationBaseUrl: http://crawl-orchestration-service:8080
+      AdminOperations__JobCatalogBaseUrl: http://job-catalog-service:8080
+      AdminOperations__ApiGatewayBaseUrl: http://api-gateway:8080
+      AdminOperations__IdentityBaseUrl: http://identity-access-service:8080
+      Jwt__Issuer: ${JWT_ISSUER:-FJob.Identity}
+      Jwt__Audience: ${JWT_AUDIENCE:-FJob.Admin}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-super-secret-jwt-signing-key-for-fjob-2026-32bytes}
+
+  frontend-web:
+    build:
+      context: .
+      dockerfile: services/frontend-web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT:-5105}:8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      APP_NAME: ${FRONTEND_APP_NAME:-FJob Tìm việc}
+      PUBLIC_API_GATEWAY_BASE_URL: http://localhost:5100
+      INTERNAL_API_GATEWAY_BASE_URL: http://api-gateway:8080
+
+volumes:
+  fjob-mysql-data:
+  fjob-ollama-data:

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FJob Admin Operations</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <p class="eyebrow">Phase 5 Security</p>
+        <h1>Dashboard van hanh co dang nhap va phan quyen admin.</h1>
+        <p class="lede">Khu vuc admin duoc bao ve bang JWT, role readonly/operator, va audit log cho login cung nhu thao tac van hanh.</p>
+      </section>
+
+      <section id="login-panel" class="panel auth-panel">
+        <h2>Admin Login</h2>
+        <form id="login-form" class="stack">
+          <label>
+            Username
+            <input id="login-username" value="admin.operator" autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <input id="login-password" type="password" value="Operator@123" autocomplete="current-password" />
+          </label>
+          <button type="submit">Dang nhap</button>
+        </form>
+        <div id="login-status" class="status hidden"></div>
+      </section>
+
+      <section id="dashboard-shell" class="hidden">
+        <section class="panel session-panel">
+          <div>
+            <strong id="session-user">Chua dang nhap</strong>
+            <div class="source-meta" id="session-role">Role: -</div>
+          </div>
+          <button id="logout-button" type="button">Dang xuat</button>
+        </section>
+
+        <section class="metrics-grid" id="metrics-grid"></section>
+
+        <section class="admin-layout">
+          <section class="panel">
+            <h2>Manual Trigger</h2>
+            <form id="manual-trigger-form" class="stack">
+              <label>
+                Source
+                <input id="source" value="TopCV" />
+              </label>
+              <label>
+                Keyword
+                <input id="keyword" value="python intern" />
+              </label>
+              <button id="trigger-button" type="submit">Trigger crawl</button>
+            </form>
+            <div id="manual-trigger-status" class="status hidden"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Source Controls</h2>
+              <button id="refresh-button" type="button">Refresh</button>
+            </div>
+            <div id="sources-list" class="stack"></div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <h2>Recent Crawl Runs</h2>
+          <div id="runs-table" class="table-wrap"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Queue Backlog</h2>
+          <div id="queue-table" class="table-wrap"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Failed Sources</h2>
+          <div id="failed-sources" class="chips"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Recent Admin Actions</h2>
+          <div id="audit-table" class="table-wrap"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

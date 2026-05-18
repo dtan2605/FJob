@@ -1,0 +1,40 @@
+COMMAND: docker exec fjob-crawl-orchestration-service-1 python3 /opt/fjob/crawl-execution-service/src/test_selenium.py
+returncode=0
+STDOUT:
+Result source: TopcvSelenium
+Jobs found: 0
+Elapsed: 91.8s
+Result source: TopcvSelenium
+Jobs found: 0
+Elapsed: 0.6s
+Starting Selenium TopCV test script
+
+=== SeleniumSource direct test ===
+Warning: WebDriverManager failed, falling back to Selenium-managed Chrome driver: 'NoneType' object has no attribute 'split'
+Error starting Selenium browser: Message: Service /root/.cache/selenium/chromedriver/linux64/148.0.7778.167/chromedriver unexpectedly exited. Status code was: 127
+
+
+=== Engine route test ===
+Warning: WebDriverManager failed, falling back to Selenium-managed Chrome driver: 'NoneType' object has no attribute 'split'
+Error starting Selenium browser: Message: Service /root/.cache/selenium/chromedriver/linux64/148.0.7778.167/chromedriver unexpectedly exited. Status code was: 127
+
+
+=== Test script completed ===
+
+STDERR:
+/bin/sh: 1: google-chrome: not found
+/bin/sh: 1: google-chrome-stable: not found
+/bin/sh: 1: google-chrome-beta: not found
+/bin/sh: 1: google-chrome-dev: not found
+/bin/sh: 1: google-chrome: not found
+/bin/sh: 1: google-chrome-stable: not found
+/bin/sh: 1: google-chrome-beta: not found
+/bin/sh: 1: google-chrome-dev: not found
+/bin/sh: 1: google-chrome: not found
+/bin/sh: 1: google-chrome-stable: not found
+/bin/sh: 1: google-chrome-beta: not found
+/bin/sh: 1: google-chrome-dev: not found
+/bin/sh: 1: google-chrome: not found
+/bin/sh: 1: google-chrome-stable: not found
+/bin/sh: 1: google-chrome-beta: not found
+/bin/sh: 1: google-chrome-dev: not found

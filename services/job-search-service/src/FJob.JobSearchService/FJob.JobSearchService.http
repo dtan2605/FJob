@@ -1,0 +1,6 @@
+@FJob.JobSearchService_HostAddress = http://localhost:5201
+
+GET {{FJob.JobSearchService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
