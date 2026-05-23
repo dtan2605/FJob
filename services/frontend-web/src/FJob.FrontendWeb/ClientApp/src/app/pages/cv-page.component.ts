@@ -3,6 +3,9 @@ import { Component, PLATFORM_ID, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CvStoreService } from '../services/cv-store.service';
 import { AppConfigService } from '../services/app-config.service';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { AuthService } from '../services/auth.service';
 
 @Component({
   selector: 'app-cv-page',
@@ -12,18 +15,20 @@ import { AppConfigService } from '../services/app-config.service';
     <section class="page-section single-column-shell">
       <div class="luxury-panel page-intro-card">
         <p class="eyebrow">Hồ sơ ứng tuyển</p>
-        <h1>Nhập CV để so sánh với từng công việc</h1>
-        <p class="section-note">
-          Tải CV dạng văn bản hoặc dán nội dung trực tiếp. Hệ thống sẽ dùng CV này để tính tỷ lệ phù hợp
-          ngay trong mỗi thẻ việc làm, hiển thị bên dưới điểm score.
-        </p>
+        <h1>Quản lý CV — sang trọng và đơn giản</h1>
+        <p class="section-note">Tải lên hoặc dán CV, hệ thống sẽ lưu an toàn và sử dụng khi bạn yêu cầu phân tích AI.
+          Chức năng CV và AI chỉ khả dụng khi bạn đã đăng nhập.</p>
       </div>
 
-      <div class="luxury-panel cv-editor-card">
-        <label class="field">
+      <div *ngIf="authService.isAuthenticated(); else loginCTA" class="luxury-panel cv-editor-card">
+        <div class="field file-input-wrapper">
           <span>Tải lên CV</span>
-          <input type="file" accept=".txt,.md,.html,.htm,.json,.rtf,.docx,.pdf" (change)="handleCvFileChange($event)">
-        </label>
+          <div class="file-controls">
+            <input #fileInput type="file" accept=".txt,.md,.html,.htm,.json,.rtf,.docx,.pdf" (change)="handleCvFileChange($event)" hidden>
+            <button class="btn btn-secondary file-select-btn" type="button" (click)="fileInput.click()">Chọn tệp</button>
+            <span class="file-name">{{ cvStore.cvFileName() || 'Chưa chọn tệp' }}</span>
+          </div>
+        </div>
 
         <label class="field">
           <span>Nội dung CV</span>
@@ -31,7 +36,7 @@ import { AppConfigService } from '../services/app-config.service';
             name="cvText"
             rows="16"
             [(ngModel)]="cvTextDraft"
-            placeholder="Dán nội dung CV của bạn tại đây để hệ thống đối chiếu với việc làm..."></textarea>
+            placeholder="Dán nội dung CV tại đây..."></textarea>
         </label>
 
         <div class="cv-panel-meta">
@@ -40,17 +45,30 @@ import { AppConfigService } from '../services/app-config.service';
           <span *ngIf="!cvStore.hasCv()">Chưa có CV nào được áp dụng.</span>
         </div>
 
-        <div class="cv-actions">
-          <button class="btn btn-primary" type="button" (click)="applyCvText()">Lưu CV</button>
-          <button class="btn btn-secondary" type="button" (click)="clearCv()">Xóa CV</button>
+        <div class="cv-actions cv-actions-compact">
+          <div class="left-actions">
+            <button class="btn btn-outline" type="button" (click)="clearCv()">Xóa</button>
+          </div>
+          <div class="right-actions">
+            <button class="btn btn-secondary" type="button" (click)="applyCvText()">Lưu</button>
+          </div>
         </div>
       </div>
+
+      <ng-template #loginCTA>
+        <div class="luxury-panel cv-editor-card">
+          <p>Vui lòng đăng nhập để sử dụng chức năng CV và AI.</p>
+          <a class="btn btn-primary" routerLink="/dang-nhap">Đăng nhập</a>
+        </div>
+      </ng-template>
     </section>
   `
 })
 export class CvPageComponent {
   protected readonly cvStore = inject(CvStoreService);
   protected readonly configService = inject(AppConfigService);
+  protected readonly http = inject(HttpClient);
+  protected readonly authService = inject(AuthService);
   protected cvTextDraft = '';
 
   private readonly platformId = inject(PLATFORM_ID);
@@ -66,33 +84,35 @@ export class CvPageComponent {
     if (!isPlatformBrowser(this.platformId)) {
       return;
     }
-
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) {
       return;
     }
+
     const name = file.name ?? '';
     const form = new FormData();
     form.append('file', file);
 
     try {
-      const resp = await fetch(`${this.configService.snapshot.apiGatewayBaseUrl}/api/uploads/parse-cv`, {
-        method: 'POST',
-        body: form,
-        credentials: 'include'
-      });
+      const headers = this.authService.getAccessToken()
+        ? { headers: new HttpHeaders({ Authorization: `Bearer ${this.authService.getAccessToken()}` }) }
+        : {};
 
-      if (!resp.ok) {
+      const resp = await firstValueFrom(this.http.post<any>(
+        `${this.configService.snapshot.apiGatewayBaseUrl}/api/uploads/parse-cv`,
+        form,
+        headers
+      ));
+
+      const text = resp?.text ?? '';
+      if (text) {
+        this.cvTextDraft = text;
+        this.cvStore.apply(text, name);
+      } else {
         this.cvTextDraft = await file.text();
         this.cvStore.apply(this.cvTextDraft, name);
-        return;
       }
-
-      const payload = await resp.json();
-      const text = payload?.text ?? '';
-      this.cvTextDraft = text;
-      this.cvStore.apply(text, name);
     } catch {
       this.cvTextDraft = await file.text();
       this.cvStore.apply(this.cvTextDraft, name);

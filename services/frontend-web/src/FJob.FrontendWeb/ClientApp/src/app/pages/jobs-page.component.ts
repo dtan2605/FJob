@@ -17,6 +17,9 @@ import { SearchService } from '../services/search.service';
 import { AppConfigService } from '../services/app-config.service';
 import { CvStoreService } from '../services/cv-store.service';
 import { CvAdviceService } from '../services/cv-advice.service';
+import { AuthService } from '../services/auth.service';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 
 @Component({
   selector: 'app-jobs-page',
@@ -26,11 +29,10 @@ import { CvAdviceService } from '../services/cv-advice.service';
     <section class="page-section search-shell">
       <aside class="luxury-panel filter-column">
         <div class="section-heading">
-          <p class="eyebrow">Bộ lọc</p>
-          <h1>Tìm việc làm</h1>
-          <p class="section-note">Tùy chỉnh truy vấn, số trang crawl và sắp xếp theo nhu cầu của bạn.</p>
+          <p class="eyebrow">Trợ lý truy vấn</p>
+          <h1>Khám phá cơ hội</h1>
+          <p class="section-note">Tùy chỉnh truy vấn, số trang crawl và sắp xếp để tìm việc nhanh, chính xác và cá tính.</p>
         </div>
-
         <form class="stack-form" (ngSubmit)="handleSubmit()">
           <label class="field">
             <span>Từ khóa</span>
@@ -102,10 +104,15 @@ import { CvAdviceService } from '../services/cv-advice.service';
               <p class="section-note">Nhập CV một lần để hệ thống tính tỷ lệ phù hợp và đưa ra góp ý cải thiện cho từng công việc.</p>
             </div>
 
-            <label class="field">
-              <span>Tải lên CV</span>
-              <input type="file" accept=".txt,.md,.html,.htm,.json,.rtf,.docx,.pdf" (change)="handleCvFileChange($event)">
-            </label>
+            <ng-container *ngIf="authService.isAuthenticated(); else jobsLoginCTA">
+              <label class="field">
+                <span>Tải lên CV</span>
+                <input type="file" accept=".txt,.md,.html,.htm,.json,.rtf,.docx,.pdf" (change)="handleCvFileChange($event)">
+              </label>
+            </ng-container>
+            <ng-template #jobsLoginCTA>
+              <div class="section-note">Vui lòng đăng nhập để dùng chức năng CV và AI.</div>
+            </ng-template>
 
             <label class="field">
               <span>Hoặc dán nội dung CV</span>
@@ -132,10 +139,24 @@ import { CvAdviceService } from '../services/cv-advice.service';
           <button class="btn btn-primary btn-block" type="submit" [disabled]="isLoading">
             {{ isLoading ? 'Đang tìm kiếm...' : 'Tìm việc ngay' }}
           </button>
+          <button class="btn btn-secondary btn-block" type="button" (click)="handleAddFilter()" [disabled]="isLoading">
+            Thêm bộ lọc (dựa trên dữ liệu hiện có)
+          </button>
         </form>
       </aside>
 
       <section class="result-column">
+        <div class="cv-status-bar">
+          <div class="cv-left">
+            <strong class="cv-label">CV:</strong>
+            <span class="file-name" *ngIf="cvStore.cvFileName(); else noCvInline">{{ cvStore.cvFileName() }}</span>
+            <ng-template #noCvInline><span class="file-name">Chưa chọn CV</span></ng-template>
+          </div>
+
+          <div class="cv-actions-inline">
+            <a class="btn file-select-btn" routerLink="/cv">Quản lý CV</a>
+          </div>
+        </div>
         <div class="luxury-panel result-header-card">
           <div>
             <p class="eyebrow">Kết quả</p>
@@ -197,7 +218,7 @@ import { CvAdviceService } from '../services/cv-advice.service';
 
             <div class="job-actions job-actions-rich">
               <a class="btn btn-secondary" [href]="item.url" target="_blank" rel="noreferrer">Xem bài đăng gốc</a>
-              <button class="btn btn-secondary" type="button" (click)="toggleAdvice(item)" [disabled]="!cvStore.hasCv() || isAdviceLoading(item)">
+              <button class="btn btn-secondary" type="button" (click)="toggleAdvice(item)" [disabled]="!cvStore.hasCv() || isAdviceLoading(item) || !authService.isAuthenticated()">
                 {{ adviceLabel(item) }}
               </button>
             </div>
@@ -284,6 +305,8 @@ export class JobsPageComponent implements OnInit {
   protected readonly configService = inject(AppConfigService);
   protected readonly cvStore = inject(CvStoreService);
   protected readonly cvAdviceService = inject(CvAdviceService);
+  protected readonly authService = inject(AuthService);
+  protected readonly http = inject(HttpClient);
 
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -308,9 +331,17 @@ export class JobsPageComponent implements OnInit {
   }
 
   protected async handleSubmit(): Promise<void> {
-    const nextQuery = { ...this.query, page: 1 };
+    // Explicit search: trigger crawl (only when user presses the search button)
+    const nextQuery = { ...this.query, page: 1, triggerCrawl: true, filterOnly: false };
     await this.navigateWithQuery(nextQuery);
     await this.runSearch(nextQuery);
+  }
+
+  protected async handleAddFilter(): Promise<void> {
+    // Add filter: do not trigger crawl, filter against existing data in DB/index
+    const nextQuery = { ...this.query, page: 1, triggerCrawl: false, filterOnly: true };
+    await this.navigateWithQuery(nextQuery);
+    await this.runSearch(nextQuery, true);
   }
 
   protected async handlePreviousPage(): Promise<void> {
@@ -358,23 +389,25 @@ export class JobsPageComponent implements OnInit {
     form.append('file', file);
 
     try {
-      const resp = await fetch(`${this.configService.snapshot.apiGatewayBaseUrl}/api/uploads/parse-cv`, {
-        method: 'POST',
-        body: form,
-        credentials: 'include'
-      });
+      const headers = this.authService.getAccessToken()
+        ? { headers: new HttpHeaders({ Authorization: `Bearer ${this.authService.getAccessToken()}` }) }
+        : {};
 
-      if (!resp.ok) {
+      const resp = await firstValueFrom(this.http.post<any>(
+        `${this.configService.snapshot.apiGatewayBaseUrl}/api/uploads/parse-cv`,
+        form,
+        headers
+      ));
+
+      const text = resp?.text ?? '';
+      if (text) {
+        this.cvTextDraft = text;
+        this.cvStore.apply(text, name);
+      } else {
         this.cvTextDraft = await file.text();
         this.cvStore.apply(this.cvTextDraft, name);
-        this.resetAdviceState();
-        return;
       }
 
-      const payload = await resp.json();
-      const text = payload?.text ?? '';
-      this.cvTextDraft = text;
-      this.cvStore.apply(text, name);
       this.resetAdviceState();
     } catch {
       this.cvTextDraft = await file.text();

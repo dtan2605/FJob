@@ -198,7 +198,9 @@ app.MapPost("/api/jobs/search", async (
         return Results.BadRequest(new { message = "No crawl sources are configured for this search." });
     }
 
-    if (request.Page <= 1)
+    // Only trigger crawl/clear when the request explicitly asks for it. This prevents
+    // accidental re-crawls on page reloads or when users navigate back to page 1.
+    if (request.TriggerCrawl && request.Page <= 1)
     {
         await jobCatalogClient.ClearJobsAsync(cancellationToken);
 
@@ -233,6 +235,10 @@ app.MapPost("/api/jobs/search", async (
 
         await jobSearchClient.RebuildIndexAsync(cancellationToken);
     }
+    else if (request.FilterOnly)
+    {
+        // No crawling or rebuild; search will consult existing catalog/index only.
+    }
 
     var response = await jobSearchClient.SearchAsync(request, cancellationToken);
     return Results.Json(response, new JsonSerializerOptions
@@ -245,8 +251,18 @@ app.MapPost("/api/uploads/parse-cv", async (
     HttpRequest req,
     IHttpClientFactory httpClientFactory,
     IOptions<ApiGatewayOptions> options,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
+    // Strict MIME type and file extension whitelist
+    string[] allowedExtensions = [".txt", ".pdf", ".docx"];
+    string[] allowedMimeTypes = [
+        "text/plain", 
+        "application/pdf", 
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ];
+    const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
+
     if (!req.HasFormContentType)
     {
         return Results.BadRequest(new { message = "multipart/form-data required." });
@@ -259,16 +275,54 @@ app.MapPost("/api/uploads/parse-cv", async (
         return Results.BadRequest(new { message = "No file uploaded." });
     }
 
+    // Validate file size
+    if (file.Length > MaxFileSizeBytes)
+    {
+        logger.LogWarning("CV upload rejected: file size {FileSize} exceeds limit {MaxSize}.", file.Length, MaxFileSizeBytes);
+        return Results.BadRequest(new { message = $"File size must not exceed {MaxFileSizeBytes / (1024 * 1024)} MB." });
+    }
+
+    if (file.Length == 0)
+    {
+        logger.LogWarning("CV upload rejected: file is empty.");
+        return Results.BadRequest(new { message = "File is empty." });
+    }
+
+    var fileName = file.FileName ?? string.Empty;
+    var fileNameLower = fileName.ToLowerInvariant();
+    var contentType = file.ContentType ?? string.Empty;
+
+    // Validate file extension (whitelist)
+    var hasValidExtension = allowedExtensions.Any(ext => fileNameLower.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
+    if (!hasValidExtension)
+    {
+        logger.LogWarning("CV upload rejected: invalid file extension '{FileName}'.", fileName);
+        return Results.BadRequest(new { message = "Only .txt, .pdf, and .docx files are allowed." });
+    }
+
+    // Validate MIME type (basic check; can be spoofed but combined with extension check is safer)
+    if (!string.IsNullOrEmpty(contentType) && !allowedMimeTypes.Any(m => contentType.Contains(m, StringComparison.OrdinalIgnoreCase)))
+    {
+        logger.LogWarning("CV upload rejected: suspicious MIME type '{ContentType}' for file '{FileName}'.", contentType, fileName);
+        return Results.BadRequest(new { message = "Invalid file type." });
+    }
+
+    // Additional check: prevent double extension attacks (e.g., file.pdf.exe)
+    var extensionCount = allowedExtensions.Count(ext => fileNameLower.Contains(ext, StringComparison.OrdinalIgnoreCase));
+    if (extensionCount > 1)
+    {
+        logger.LogWarning("CV upload rejected: multiple extensions detected in '{FileName}'.", fileName);
+        return Results.BadRequest(new { message = "Invalid filename format." });
+    }
+
     await using var ms = new MemoryStream();
     await file.CopyToAsync(ms, cancellationToken);
     ms.Position = 0;
-    var fileName = file.FileName ?? string.Empty;
-    var lower = fileName.ToLowerInvariant();
     string text = string.Empty;
 
     try
     {
-        if (lower.EndsWith(".docx"))
+        if (fileNameLower.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
         {
             ms.Position = 0;
             using var doc = WordprocessingDocument.Open(ms, false);
@@ -294,7 +348,7 @@ app.MapPost("/api/uploads/parse-cv", async (
                 text = sb.ToString();
             }
         }
-        else if (lower.EndsWith(".pdf"))
+        else if (fileNameLower.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
         {
             ms.Position = 0;
             using var pdf = PdfDocument.Open(ms);
@@ -328,7 +382,7 @@ app.MapPost("/api/uploads/parse-cv", async (
 
             text = sb.ToString();
         }
-        else
+        else if (fileNameLower.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
         {
             ms.Position = 0;
             using var reader = new StreamReader(ms);
@@ -336,7 +390,7 @@ app.MapPost("/api/uploads/parse-cv", async (
         }
 
         // If PDF looks like gibberish and OCR service is configured, send to OCR
-        if (lower.EndsWith(".pdf") && IsMostlyGibberish(text))
+        if (fileNameLower.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && IsMostlyGibberish(text))
         {
             try
             {
@@ -358,19 +412,29 @@ app.MapPost("/api/uploads/parse-cv", async (
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore OCR failures and fall back to extracted text
+                logger.LogWarning(ex, "OCR service call failed; falling back to extracted text.");
             }
         }
     }
     catch (Exception ex)
     {
+        logger.LogError(ex, "Error parsing CV file '{FileName}'.", fileName);
         return Results.StatusCode(StatusCodes.Status500InternalServerError);
     }
 
+    // Validate extracted text is not empty or suspicious
+    if (string.IsNullOrWhiteSpace(text))
+    {
+        logger.LogWarning("CV upload rejected: no readable text extracted from '{FileName}'.", fileName);
+        return Results.BadRequest(new { message = "File contains no readable text." });
+    }
+
+    logger.LogInformation("CV file '{FileName}' successfully parsed ({TextLength} characters).", fileName, text.Length);
     return Results.Ok(new { text });
-}).AllowAnonymous();
+}).AllowAnonymous().WithName("ParseCV");
+
 
 static string? BuildSalaryRange(decimal? min, decimal? max)
 {

@@ -57,6 +57,9 @@ export interface SearchQueryState {
   maxPages: number;
   page: number;
   pageSize: number;
+  // Local flags to control backend behavior; not persisted in URL.
+  triggerCrawl?: boolean;
+  filterOnly?: boolean;
 }
 
 export interface SearchResultsState {

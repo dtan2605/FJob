@@ -28,7 +28,10 @@ export class SearchService {
       page: query.page,
       pageSize: query.pageSize,
       maxPages: query.maxPages || MIN_CRAWL_PAGES,
-      sortBy: query.sortBy
+      sortBy: query.sortBy,
+      // Control backend crawl behavior explicitly
+      triggerCrawl: Boolean((query as any).triggerCrawl),
+      filterOnly: Boolean((query as any).filterOnly)
     };
   }
 

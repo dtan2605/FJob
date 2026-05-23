@@ -13,4 +13,11 @@ public sealed class SearchQueryRequest
     public int PageSize { get; init; } = 20;
     public int? MaxPages { get; init; }
     public string SortBy { get; init; } = "recent";
+    // If true the search endpoint will trigger an immediate crawl (clear + enqueue).
+    // Default false to avoid accidental re-crawls on page reload or route navigation.
+    public bool TriggerCrawl { get; init; } = false;
+
+    // When true, search will only filter against existing data in the catalog/index
+    // and will not trigger any crawling or index rebuild.
+    public bool FilterOnly { get; init; } = false;
 }
